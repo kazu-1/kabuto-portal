@@ -180,17 +180,16 @@
     }
 
     // ---- GAS API 呼び出し ----
-    // Content-Type を text/plain にすることで CORS プリフライトを回避する
+    // GETリクエスト + クエリパラメータ方式（CORSリダイレクト問題を回避）
 
     async function callGAS(action, payload = {}) {
       if (!GAS_URL) {
         throw new Error('GAS URL が設定されていません。画面上部の設定から入力してください。');
       }
-      const res = await fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action, ...payload })
-      });
+      const url = new URL(GAS_URL);
+      url.searchParams.set('action', action);
+      url.searchParams.set('payload', JSON.stringify(payload));
+      const res = await fetch(url.toString());
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }
