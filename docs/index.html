@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>飼育ログ 音声入力</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body { background: #f0f4f8; }
+    .mic-btn {
+      width: 100px; height: 100px;
+      border-radius: 50%;
+      font-size: 2.5rem;
+      border: none;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .mic-btn:active { transform: scale(0.95); }
+    .mic-btn.listening {
+      background: #dc3545 !important;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0.5); }
+      50%       { box-shadow: 0 0 0 18px rgba(220,53,69,0); }
+    }
+    .transcript-box {
+      min-height: 64px;
+      background: #fff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 1rem;
+    }
+    .interim { color: #aaa; font-style: italic; }
+    .final   { color: #212529; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="container py-4" style="max-width:580px">
+    <h5 class="text-center mb-1">🐛 飼育ログ 音声入力</h5>
+
+    <!-- 設定パネル（GAS URL未設定のときのみ目立たせる） -->
+    <div id="settingsCard" class="card shadow-sm mb-3 border-warning">
+      <div class="card-header bg-warning bg-opacity-25 d-flex justify-content-between align-items-center"
+           style="cursor:pointer" onclick="toggleSettings()">
+        <span><i class="bi bi-gear me-1"></i>設定</span>
+        <i id="settingsChevron" class="bi bi-chevron-down"></i>
+      </div>
+      <div id="settingsBody" class="card-body">
+        <label class="form-label small fw-semibold">GAS デプロイ URL</label>
+        <div class="input-group">
+          <input type="url" id="gasUrl" class="form-control form-control-sm"
+                 placeholder="https://script.google.com/macros/s/.../exec">
+          <button class="btn btn-sm btn-primary" onclick="saveSettings()">保存</button>
+        </div>
+        <div class="form-text">GAS を「ウェブアプリ」としてデプロイして取得した URL を貼り付けてください。</div>
+      </div>
+    </div>
+
+    <!-- 録音セクション -->
+    <div class="card shadow-sm mb-3">
+      <div class="card-body text-center py-4">
+        <button id="micBtn" class="btn btn-primary mic-btn mb-3" onclick="toggleRecording()">
+          <i class="bi bi-mic-fill"></i>
+        </button>
+        <p id="status" class="text-muted small mb-2">タップして録音開始</p>
+        <div id="transcript" class="transcript-box text-start">
+          <span class="text-muted">ここに音声が表示されます...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gemini 解析中 -->
+    <div id="processingCard" class="card shadow-sm mb-3 d-none">
+      <div class="card-body text-center py-3">
+        <div class="spinner-border spinner-border-sm text-primary me-2"></div>
+        <span>Gemini が解析中...</span>
+      </div>
+    </div>
+
+    <!-- 解析結果 / 確認フォーム -->
+    <div id="resultCard" class="card shadow-sm mb-3 d-none">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-robot"></i>
+        <span>解析結果を確認・修正して保存</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label small fw-semibold">個体ID</label>
+            <input type="text" id="resId" class="form-control" placeholder="例: 5A">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-semibold">アクション</label>
+            <select id="resAction" class="form-select">
+              <option>採卵</option>
+              <option>孵化</option>
+              <option>マット交換</option>
+              <option>購入</option>
+              <option>その他</option>
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small fw-semibold">数値</label>
+            <input type="number" id="resValue" class="form-control" placeholder="12">
+          </div>
+          <div class="col-4">
+            <label class="form-label small fw-semibold">単位</label>
+            <input type="text" id="resUnit" class="form-control" placeholder="個">
+          </div>
+          <div class="col-4">
+            <label class="form-label small fw-semibold">体重 (g)</label>
+            <input type="text" id="resWeights" class="form-control" placeholder="8,9,7">
+          </div>
+          <div class="col-12">
+            <label class="form-label small fw-semibold">メモ</label>
+            <input type="text" id="resMemo" class="form-control" placeholder="補足情報">
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-success flex-grow-1" onclick="saveLog()">
+            <i class="bi bi-save2-fill me-1"></i>保存する
+          </button>
+          <button class="btn btn-outline-secondary" onclick="clearResult()">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- アラート -->
+    <div id="alertArea"></div>
+
+    <!-- 今セッションの記録 -->
+    <div class="card shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-clock-history"></i>
+        <span>今セッションの記録</span>
+      </div>
+      <ul id="logList" class="list-group list-group-flush">
+        <li class="list-group-item text-muted text-center small py-3">まだ記録がありません</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // ---- 設定管理 ----
+
+    let GAS_URL = localStorage.getItem('gasUrl') || '';
+
+    function init() {
+      document.getElementById('gasUrl').value = GAS_URL;
+      if (GAS_URL) collapseSettings();
+    }
+
+    function saveSettings() {
+      GAS_URL = document.getElementById('gasUrl').value.trim();
+      localStorage.setItem('gasUrl', GAS_URL);
+      collapseSettings();
+      showAlert('success', '設定を保存しました。');
+    }
+
+    function toggleSettings() {
+      const body = document.getElementById('settingsBody');
+      const chevron = document.getElementById('settingsChevron');
+      if (body.style.display === 'none') {
+        body.style.display = '';
+        chevron.className = 'bi bi-chevron-up';
+      } else {
+        collapseSettings();
+      }
+    }
+
+    function collapseSettings() {
+      document.getElementById('settingsBody').style.display = 'none';
+      document.getElementById('settingsChevron').className = 'bi bi-chevron-down';
+      const card = document.getElementById('settingsCard');
+      card.classList.remove('border-warning');
+      card.querySelector('.card-header').classList.remove('bg-warning', 'bg-opacity-25');
+    }
+
+    // ---- GAS API 呼び出し ----
+    // Content-Type を text/plain にすることで CORS プリフライトを回避する
+
+    async function callGAS(action, payload = {}) {
+      if (!GAS_URL) {
+        throw new Error('GAS URL が設定されていません。画面上部の設定から入力してください。');
+      }
+      const res = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action, ...payload })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    // ---- 音声認識 ----
+
+    let recognition = null;
+    let isListening = false;
+    let finalTranscript = '';
+
+    function initRecognition() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        showAlert('danger', 'このブラウザは音声認識に対応していません。Android Chrome をお使いください。');
+        return null;
+      }
+      const r = new SR();
+      r.lang = 'ja-JP';
+      r.continuous = false;
+      r.interimResults = true;
+
+      r.onstart = () => {
+        isListening = true;
+        finalTranscript = '';
+        document.getElementById('micBtn').classList.add('listening');
+        document.getElementById('status').textContent = '録音中... もう一度タップで停止';
+        document.getElementById('transcript').innerHTML = '<span class="interim">聞いています...</span>';
+      };
+
+      r.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+          else interim += e.results[i][0].transcript;
+        }
+        document.getElementById('transcript').innerHTML =
+          `<span class="final">${finalTranscript}</span><span class="interim">${interim}</span>`;
+      };
+
+      r.onend = () => {
+        isListening = false;
+        document.getElementById('micBtn').classList.remove('listening');
+        document.getElementById('status').textContent = 'タップして録音開始';
+        if (finalTranscript.trim()) processText(finalTranscript.trim());
+      };
+
+      r.onerror = (e) => {
+        isListening = false;
+        document.getElementById('micBtn').classList.remove('listening');
+        document.getElementById('status').textContent = 'タップして録音開始';
+        const msgs = {
+          'not-allowed':         'マイクの使用が拒否されています。ブラウザのアドレスバーからマイク権限を許可してください。',
+          'network':             'ネットワークエラーです。インターネット接続を確認してください。',
+          'audio-capture':       'マイクが見つかりません。デバイスのマイクを確認してください。',
+          'service-not-allowed': '音声認識サービスが利用できません。',
+          'aborted':             null,
+          'no-speech':           null,
+        };
+        const msg = msgs[e.error];
+        if (msg) showAlert('warning', msg);
+        if (msg === undefined) showAlert('danger', `音声認識エラー: ${e.error}`);
+      };
+
+      return r;
+    }
+
+    function toggleRecording() {
+      if (!recognition) recognition = initRecognition();
+      if (!recognition) return;
+      if (isListening) {
+        recognition.stop();
+      } else {
+        try { recognition.start(); }
+        catch (_) { recognition = initRecognition(); recognition.start(); }
+      }
+    }
+
+    // ---- Gemini 解析 ----
+
+    async function processText(text) {
+      document.getElementById('processingCard').classList.remove('d-none');
+      document.getElementById('resultCard').classList.add('d-none');
+      try {
+        const data = await callGAS('processVoice', { text });
+        showResult(data);
+      } catch (e) {
+        showAlert('danger', '解析エラー: ' + e.message);
+      } finally {
+        document.getElementById('processingCard').classList.add('d-none');
+      }
+    }
+
+    function showResult(data) {
+      if (data.error) { showAlert('danger', 'エラー: ' + data.error); return; }
+      document.getElementById('resId').value      = data.id || '';
+      document.getElementById('resAction').value  = data.action || '採卵';
+      document.getElementById('resValue').value   = data.value ?? '';
+      document.getElementById('resUnit').value    = data.unit || '';
+      document.getElementById('resWeights').value = (data.weights || []).join(', ');
+      document.getElementById('resMemo').value    = data.memo || '';
+      const card = document.getElementById('resultCard');
+      card.classList.remove('d-none');
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // ---- 保存 ----
+
+    async function saveLog() {
+      const weights = document.getElementById('resWeights').value
+        .split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+      const data = {
+        id:      document.getElementById('resId').value.trim(),
+        action:  document.getElementById('resAction').value,
+        value:   parseFloat(document.getElementById('resValue').value) || null,
+        unit:    document.getElementById('resUnit').value.trim(),
+        weights,
+        memo:    document.getElementById('resMemo').value.trim(),
+        raw:     finalTranscript
+      };
+      try {
+        const result = await callGAS('saveLog', { data });
+        if (result.error) { showAlert('danger', '保存エラー: ' + result.error); return; }
+        showAlert('success', '保存しました！');
+        addSessionLog(data);
+        clearResult();
+      } catch (e) {
+        showAlert('danger', '保存エラー: ' + e.message);
+      }
+    }
+
+    function clearResult() {
+      document.getElementById('resultCard').classList.add('d-none');
+      document.getElementById('transcript').innerHTML = '<span class="text-muted">ここに音声が表示されます...</span>';
+      finalTranscript = '';
+    }
+
+    // ---- セッションログ（画面表示のみ）----
+
+    function addSessionLog(data) {
+      const list = document.getElementById('logList');
+      const empty = list.querySelector('.text-muted');
+      if (empty) empty.remove();
+      const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      const badgeMap = { '採卵':'bg-success','孵化':'bg-info text-dark','マット交換':'bg-warning text-dark','購入':'bg-secondary','その他':'bg-light text-dark' };
+      const badge = badgeMap[data.action] || 'bg-secondary';
+      const li = document.createElement('li');
+      li.className = 'list-group-item py-2';
+      li.innerHTML = `
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <small class="text-muted">${time}</small>
+          <strong>${data.id || '?'}</strong>
+          <span class="badge ${badge}">${data.action}</span>
+          ${data.value ? `<span class="text-muted small">${data.value}${data.unit||''}</span>` : ''}
+          ${data.weights.length ? `<span class="text-muted small">体重: ${data.weights.join(',')}g</span>` : ''}
+        </div>
+        ${data.memo ? `<div class="text-muted small ms-1">${data.memo}</div>` : ''}
+      `;
+      list.insertBefore(li, list.firstChild);
+    }
+
+    // ---- アラート ----
+
+    function showAlert(type, msg) {
+      const area = document.getElementById('alertArea');
+      area.innerHTML = `<div class="alert alert-${type} alert-dismissible mb-3" role="alert">
+        ${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+      setTimeout(() => { area.innerHTML = ''; }, 5000);
+    }
+
+    init();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,3 +1,9 @@
-node_modules/
-.env
-*.local
+# すべて無視（リポジトリは公開のため最小限のみ追跡）
+*
+
+# .gitignore 自身は追跡
+!.gitignore
+
+# GitHub Pages 用フォルダのみ公開
+!docs/
+!docs/**
