@@ -41,7 +41,7 @@
   <div class="container py-4" style="max-width:580px">
     <h5 class="text-center mb-1">🐛 飼育ログ 音声入力</h5>
 
-    <!-- 設定パネル（GAS URL未設定のときのみ目立たせる） -->
+    <!-- 設定パネル -->
     <div id="settingsCard" class="card shadow-sm mb-3 border-warning">
       <div class="card-header bg-warning bg-opacity-25 d-flex justify-content-between align-items-center"
            style="cursor:pointer" onclick="toggleSettings()">
@@ -66,9 +66,13 @@
           <i class="bi bi-mic-fill"></i>
         </button>
         <p id="status" class="text-muted small mb-2">タップして録音開始</p>
-        <div id="transcript" class="transcript-box text-start">
+        <div id="transcript" class="transcript-box text-start mb-3">
           <span class="text-muted">ここに音声が表示されます...</span>
         </div>
+        <!-- 録音完了後に表示。自動でGeminiは呼ばない -->
+        <button id="analyzeBtn" class="btn btn-primary w-100 d-none" onclick="runAnalyze()">
+          <i class="bi bi-robot me-1"></i>Gemini で解析する
+        </button>
       </div>
     </div>
 
@@ -98,25 +102,20 @@
               <option>採卵</option>
               <option>孵化</option>
               <option>マット交換</option>
-              <option>購入</option>
               <option>その他</option>
             </select>
           </div>
-          <div class="col-4">
-            <label class="form-label small fw-semibold">数値</label>
-            <input type="number" id="resValue" class="form-control" placeholder="12">
+          <div class="col-6">
+            <label id="valueLabelText" class="form-label small fw-semibold">数値</label>
+            <input type="number" id="resValue" class="form-control" placeholder="">
           </div>
-          <div class="col-4">
+          <div class="col-6">
             <label class="form-label small fw-semibold">単位</label>
-            <input type="text" id="resUnit" class="form-control" placeholder="個">
-          </div>
-          <div class="col-4">
-            <label class="form-label small fw-semibold">体重 (g)</label>
-            <input type="text" id="resWeights" class="form-control" placeholder="8,9,7">
+            <input type="text" id="resUnit" class="form-control" placeholder="">
           </div>
           <div class="col-12">
             <label class="form-label small fw-semibold">メモ</label>
-            <input type="text" id="resMemo" class="form-control" placeholder="補足情報">
+            <input type="text" id="resMemo" class="form-control" placeholder="ケース増設・補足情報など">
           </div>
         </div>
         <div class="d-flex gap-2">
@@ -151,6 +150,8 @@
     function init() {
       document.getElementById('gasUrl').value = GAS_URL;
       if (GAS_URL) collapseSettings();
+      updateValueLabel();
+      document.getElementById('resAction').addEventListener('change', updateValueLabel);
     }
 
     function saveSettings() {
@@ -179,9 +180,14 @@
       card.querySelector('.card-header').classList.remove('bg-warning', 'bg-opacity-25');
     }
 
+    // アクションに応じて数値ラベルを変える
+    function updateValueLabel() {
+      const action = document.getElementById('resAction').value;
+      const labels = { '採卵': '卵の個数', '孵化': '幼虫の数', 'マット交換': '幼虫の数', 'その他': '数値' };
+      document.getElementById('valueLabelText').textContent = labels[action] || '数値';
+    }
+
     // ---- GAS API 呼び出し（JSONP）----
-    // fetch() は GAS の CORS 制限でブロックされるため
-    // <script> タグで読み込む JSONP 方式を使う（CORS 制限なし）
 
     function callGAS(action, payload = {}) {
       return new Promise((resolve, reject) => {
@@ -189,18 +195,13 @@
           reject(new Error('GAS URL が設定されていません。画面上部の設定から入力してください。'));
           return;
         }
-
         const cbName = '__cb_' + Date.now();
         const url = new URL(GAS_URL);
         url.searchParams.set('action', action);
         url.searchParams.set('payload', JSON.stringify(payload));
         url.searchParams.set('callback', cbName);
 
-        const timer = setTimeout(() => {
-          cleanup();
-          reject(new Error('タイムアウト（30秒）'));
-        }, 30000);
-
+        const timer = setTimeout(() => { cleanup(); reject(new Error('タイムアウト（30秒）')); }, 30000);
         window[cbName] = (data) => { cleanup(); resolve(data); };
 
         function cleanup() {
@@ -241,6 +242,7 @@
         document.getElementById('micBtn').classList.add('listening');
         document.getElementById('status').textContent = '録音中... もう一度タップで停止';
         document.getElementById('transcript').innerHTML = '<span class="interim">聞いています...</span>';
+        document.getElementById('analyzeBtn').classList.add('d-none');
       };
 
       r.onresult = (e) => {
@@ -257,7 +259,10 @@
         isListening = false;
         document.getElementById('micBtn').classList.remove('listening');
         document.getElementById('status').textContent = 'タップして録音開始';
-        if (finalTranscript.trim()) processText(finalTranscript.trim());
+        // 自動解析しない。ボタンを表示して待つ
+        if (finalTranscript.trim()) {
+          document.getElementById('analyzeBtn').classList.remove('d-none');
+        }
       };
 
       r.onerror = (e) => {
@@ -291,16 +296,19 @@
       }
     }
 
-    // ---- Gemini 解析 ----
+    // ---- Gemini 解析（ボタン押下時のみ実行）----
 
-    async function processText(text) {
+    async function runAnalyze() {
+      if (!finalTranscript.trim()) return;
+      document.getElementById('analyzeBtn').classList.add('d-none');
       document.getElementById('processingCard').classList.remove('d-none');
       document.getElementById('resultCard').classList.add('d-none');
       try {
-        const data = await callGAS('processVoice', { text });
+        const data = await callGAS('processVoice', { text: finalTranscript.trim() });
         showResult(data);
       } catch (e) {
         showAlert('danger', '解析エラー: ' + e.message);
+        document.getElementById('analyzeBtn').classList.remove('d-none');
       } finally {
         document.getElementById('processingCard').classList.add('d-none');
       }
@@ -308,12 +316,12 @@
 
     function showResult(data) {
       if (data.error) { showAlert('danger', 'エラー: ' + data.error); return; }
-      document.getElementById('resId').value      = data.id || '';
-      document.getElementById('resAction').value  = data.action || '採卵';
-      document.getElementById('resValue').value   = data.value ?? '';
-      document.getElementById('resUnit').value    = data.unit || '';
-      document.getElementById('resWeights').value = (data.weights || []).join(', ');
-      document.getElementById('resMemo').value    = data.memo || '';
+      document.getElementById('resId').value     = data.id || '';
+      document.getElementById('resAction').value = data.action || '採卵';
+      document.getElementById('resValue').value  = data.value != null ? data.value : '';
+      document.getElementById('resUnit').value   = data.unit || '';
+      document.getElementById('resMemo').value   = data.memo || '';
+      updateValueLabel();
       const card = document.getElementById('resultCard');
       card.classList.remove('d-none');
       card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -322,16 +330,13 @@
     // ---- 保存 ----
 
     async function saveLog() {
-      const weights = document.getElementById('resWeights').value
-        .split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
       const data = {
-        id:      document.getElementById('resId').value.trim(),
-        action:  document.getElementById('resAction').value,
-        value:   parseFloat(document.getElementById('resValue').value) || null,
-        unit:    document.getElementById('resUnit').value.trim(),
-        weights,
-        memo:    document.getElementById('resMemo').value.trim(),
-        raw:     finalTranscript
+        id:     document.getElementById('resId').value.trim(),
+        action: document.getElementById('resAction').value,
+        value:  parseFloat(document.getElementById('resValue').value) || null,
+        unit:   document.getElementById('resUnit').value.trim(),
+        memo:   document.getElementById('resMemo').value.trim(),
+        raw:    finalTranscript
       };
       try {
         const result = await callGAS('saveLog', { data });
@@ -346,18 +351,19 @@
 
     function clearResult() {
       document.getElementById('resultCard').classList.add('d-none');
+      document.getElementById('analyzeBtn').classList.add('d-none');
       document.getElementById('transcript').innerHTML = '<span class="text-muted">ここに音声が表示されます...</span>';
       finalTranscript = '';
     }
 
-    // ---- セッションログ（画面表示のみ）----
+    // ---- セッションログ ----
 
     function addSessionLog(data) {
       const list = document.getElementById('logList');
       const empty = list.querySelector('.text-muted');
       if (empty) empty.remove();
       const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      const badgeMap = { '採卵':'bg-success','孵化':'bg-info text-dark','マット交換':'bg-warning text-dark','購入':'bg-secondary','その他':'bg-light text-dark' };
+      const badgeMap = { '採卵':'bg-success', '孵化':'bg-info text-dark', 'マット交換':'bg-warning text-dark', 'その他':'bg-light text-dark border' };
       const badge = badgeMap[data.action] || 'bg-secondary';
       const li = document.createElement('li');
       li.className = 'list-group-item py-2';
@@ -366,8 +372,7 @@
           <small class="text-muted">${time}</small>
           <strong>${data.id || '?'}</strong>
           <span class="badge ${badge}">${data.action}</span>
-          ${data.value ? `<span class="text-muted small">${data.value}${data.unit||''}</span>` : ''}
-          ${data.weights.length ? `<span class="text-muted small">体重: ${data.weights.join(',')}g</span>` : ''}
+          ${data.value != null ? `<span class="text-muted small">${data.value}${data.unit || ''}</span>` : ''}
         </div>
         ${data.memo ? `<div class="text-muted small ms-1">${data.memo}</div>` : ''}
       `;
