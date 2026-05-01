@@ -318,7 +318,7 @@
       if (data.error) { showAlert('danger', 'エラー: ' + data.error); return; }
       document.getElementById('resId').value     = data.id || '';
       document.getElementById('resAction').value = data.action || '採卵';
-      document.getElementById('resValue').value  = data.value != null ? data.value : '';
+      document.getElementById('resValue').value  = data.value ? data.value : '';
       document.getElementById('resUnit').value   = data.unit || '';
       document.getElementById('resMemo').value   = data.memo || '';
       updateValueLabel();
