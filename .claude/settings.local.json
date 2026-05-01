@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(ls -Path \"c:\\\\Users\\\\kazuk\\\\Desktop\\\\FJ研究所\\\\南伊勢\\\\カブトムシ\\\\kabuto portal\" -Force | Where-Object { -not $_.PSIsContainer } | Select-Object Name)",
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\kazuk\\\\Desktop\\\\FJ研究所\\\\南伊勢\\\\カブトムシ\\\\kabuto portal\" -Force | Where-Object { -not $_.PSIsContainer } | ForEach-Object { $_.FullName })"
+    ]
+  }
+}
