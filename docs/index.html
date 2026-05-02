@@ -315,7 +315,11 @@
     }
 
     function showResult(data) {
-      if (data.error) { showAlert('danger', 'エラー: ' + data.error); return; }
+      if (data.error) {
+        showAlert('danger', 'エラー: ' + data.error + (data._logError ? '　[ログ書込失敗: ' + data._logError + ']' : ''));
+        return;
+      }
+      if (data._logError) showAlert('warning', 'ログ書込エラー: ' + data._logError);
       document.getElementById('resId').value     = data.id || '';
       document.getElementById('resAction').value = data.action || '採卵';
       document.getElementById('resValue').value  = data.value ? data.value : '';
